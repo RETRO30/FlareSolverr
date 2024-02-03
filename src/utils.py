@@ -7,6 +7,8 @@ import urllib.parse
 import tempfile
 
 from selenium.webdriver.chrome.webdriver import WebDriver
+from selenium.webdriver.common.proxy import Proxy, ProxyType
+from selenium import webdriver
 import undetected_chromedriver as uc
 
 FLARESOLVERR_VERSION = None
@@ -125,11 +127,13 @@ def get_webdriver(proxy: dict = None) -> WebDriver:
     options.add_argument('--disable-dev-shm-usage')
     # this option removes the zygote sandbox (it seems that the resolution is a bit faster)
     options.add_argument('--no-zygote')
+    options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.0.0 Safari/537.36')
     # attempt to fix Docker ARM32 build
     options.add_argument('--disable-gpu-sandbox')
     options.add_argument('--disable-software-rasterizer')
     options.add_argument('--ignore-certificate-errors')
     options.add_argument('--ignore-ssl-errors')
+    options.add_argument('--auto-open-devtools-for-tabs')
     # fix GL errors in ASUSTOR NAS
     # https://github.com/FlareSolverr/FlareSolverr/issues/782
     # https://github.com/microsoft/vscode/issues/127800#issuecomment-873342069
@@ -145,9 +149,15 @@ def get_webdriver(proxy: dict = None) -> WebDriver:
         options.add_argument('--user-agent=%s' % USER_AGENT)
 
     proxy_extension_dir = None
+    capabilities = None
     if proxy and all(key in proxy for key in ['url', 'username', 'password']):
-        proxy_extension_dir = create_proxy_extension(proxy)
-        options.add_argument("--load-extension=%s" % os.path.abspath(proxy_extension_dir))
+        chromeproxy = Proxy()
+        chromeproxy.proxy_type = ProxyType.MANUAL
+        url = proxy['url'].replace('http://', '').replace('https://', '')
+        chromeproxy.http_proxy = f'{proxy["username"]}:{proxy["password"]}@{url}'
+        chromeproxy.ssl_proxy = f'{proxy["username"]}:{proxy["password"]}@{url}'
+        capabilities = webdriver.DesiredCapabilities.CHROME.copy()
+        capabilities = chromeproxy.to_capabilities()
     elif proxy and 'url' in proxy:
         proxy_url = proxy['url']
         logging.debug("Using webdriver proxy: %s", proxy_url)
@@ -167,6 +177,7 @@ def get_webdriver(proxy: dict = None) -> WebDriver:
     # if we are inside the Docker container, we avoid downloading the driver
     driver_exe_path = None
     version_main = None
+    
     if os.path.exists("/app/chromedriver"):
         # running inside Docker
         driver_exe_path = "/app/chromedriver"
@@ -182,7 +193,7 @@ def get_webdriver(proxy: dict = None) -> WebDriver:
     # if we don't set driver_executable_path it downloads, patches, and deletes the driver each time
     driver = uc.Chrome(options=options, browser_executable_path=browser_executable_path,
                        driver_executable_path=driver_exe_path, version_main=version_main,
-                       windows_headless=windows_headless, headless=windows_headless)
+                       windows_headless=windows_headless, headless=windows_headless, desired_capabilities=capabilities)
 
     # save the patched driver to avoid re-downloads
     if driver_exe_path is None:

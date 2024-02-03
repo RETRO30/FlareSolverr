@@ -8,6 +8,7 @@ from urllib.parse import unquote
 from func_timeout import FunctionTimedOut, func_timeout
 from selenium.common import TimeoutException
 from selenium.webdriver.chrome.webdriver import WebDriver
+
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.expected_conditions import (
     presence_of_element_located, staleness_of, title_is)
@@ -19,6 +20,7 @@ from dtos import (STATUS_ERROR, STATUS_OK, ChallengeResolutionResultT,
                   ChallengeResolutionT, HealthResponse, IndexResponse,
                   V1RequestBase, V1ResponseBase)
 from sessions import SessionsStorage
+from selenium.webdriver.common.keys import Keys
 
 ACCESS_DENIED_TITLES = [
     # Cloudflare
@@ -320,36 +322,44 @@ def _evil_logic(req: V1RequestBase, driver: WebDriver, method: str) -> Challenge
         logging.debug(f"Response HTML:\n{driver.page_source}")
     html_element = driver.find_element(By.TAG_NAME, "html")
     page_title = driver.title
-
+    print(page_title)
+    
     # find access denied titles
-    for title in ACCESS_DENIED_TITLES:
-        if title == page_title:
-            raise Exception('Cloudflare has blocked this request. '
-                            'Probably your IP is banned for this site, check in your web browser.')
-    # find access denied selectors
-    for selector in ACCESS_DENIED_SELECTORS:
-        found_elements = driver.find_elements(By.CSS_SELECTOR, selector)
-        if len(found_elements) > 0:
-            raise Exception('Cloudflare has blocked this request. '
-                            'Probably your IP is banned for this site, check in your web browser.')
-
-    # find challenge by title
-    challenge_found = False
-    for title in CHALLENGE_TITLES:
-        if title.lower() == page_title.lower():
-            challenge_found = True
-            logging.info("Challenge detected. Title found: " + page_title)
-            break
-    if not challenge_found:
-        # find challenge by selectors
-        for selector in CHALLENGE_SELECTORS:
+    for x in driver.window_handles:
+        driver.switch_to.window(x)
+        for title in ACCESS_DENIED_TITLES:
+            if title == page_title:
+                raise Exception('Cloudflare has blocked this request. '
+                                'Probably your IP is banned for this site, check in your web browser.')
+        # find access denied selectors
+        for selector in ACCESS_DENIED_SELECTORS:
             found_elements = driver.find_elements(By.CSS_SELECTOR, selector)
             if len(found_elements) > 0:
+                raise Exception('Cloudflare has blocked this request. '
+                                'Probably your IP is banned for this site, check in your web browser.')
+    d = ""
+    # find challenge by title
+    challenge_found = False
+    for x in driver.window_handles:
+        driver.switch_to.window(x)
+        for title in CHALLENGE_TITLES:
+            if title.lower() == page_title.lower():
                 challenge_found = True
-                logging.info("Challenge detected. Selector found: " + selector)
+                d = x
+                logging.info("Challenge detected. Title found: " + page_title)
                 break
-
+        if not challenge_found:
+            # find challenge by selectors
+            for selector in CHALLENGE_SELECTORS:
+                found_elements = driver.find_elements(By.CSS_SELECTOR, selector)
+                if len(found_elements) > 0:
+                    challenge_found = True
+                    logging.info("Challenge detected. Selector found: " + selector)
+                    break
+    driver.switch_to.window(d)
     attempt = 0
+
+    driver.execute_script("location.reload(true);")
     if challenge_found:
         while True:
             try:
